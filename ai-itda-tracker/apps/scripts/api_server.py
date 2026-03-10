@@ -40,18 +40,25 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS — 로컬 개발용 (webapp에서 fetch 가능)
+# CORS — Lovable 프론트엔드 + 로컬 개발용
+_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "null",  # file:// 프로토콜
+]
+
+# 환경변수로 추가 origin 허용 (Railway 배포 시 Lovable URL 설정)
+_extra_origin = os.environ.get("FRONTEND_URL", "")
+if _extra_origin:
+    _ALLOWED_ORIGINS.append(_extra_origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5500",
-        "http://127.0.0.1:5500",
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-        "https://blog30.lovable.app",
-        "null",  # file:// 프로토콜
-    ],
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.lovable\.app",  # Lovable 서브도메인 전체 허용
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -571,6 +578,12 @@ def get_image_tags(tool_name: str):
 # ──────────────────────────────────────────────────────
 # 5. 헬스체크 / 서버 정보
 # ──────────────────────────────────────────────────────
+
+@app.get("/")
+def root():
+    """루트 — Vercel 배포 확인용."""
+    return {"status": "ok", "service": "AI있다 TAAFT Tracker API"}
+
 
 @app.get("/api/health")
 def health_check():

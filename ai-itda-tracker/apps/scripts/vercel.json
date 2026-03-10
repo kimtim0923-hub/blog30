@@ -7,12 +7,9 @@
   ],
   "routes": [
     {
-      "src": "/api/(.*)",
-      "dest": "api_server.py"
-    },
-    {
       "src": "/(.*)",
       "dest": "api_server.py"
     }
-  ]
+  ],
+  "outputDirectory": "."
 }
