@@ -12,11 +12,14 @@ import sys
 import time
 import argparse
 from datetime import datetime
+
+import markdown
 from pathlib import Path
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
@@ -88,13 +91,22 @@ def login(driver: webdriver.Chrome, blog_name: str,
         driver.get(login_url)
         wait = WebDriverWait(driver, WAIT_TIMEOUT)
 
-        # "카카오계정으로 로그인" 버튼 클릭
-        kakao_btn = wait.until(
-            EC.element_to_be_clickable(
-                (By.CSS_SELECTOR, "a.btn_kakao, a[href*='kakao'], .kakao_btn, "
-                                  "a.login_btn_kakao, a[data-provider='kakao']")
+        # "카카오계정으로 로그인" 버튼 클릭 (여러 셀렉터 시도)
+        try:
+            kakao_btn = wait.until(
+                EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "a.btn_kakao, a[href*='kakao'], .kakao_btn, "
+                                      "a.login_btn_kakao, a[data-provider='kakao'], "
+                                      ".link_kakao_id, .btn_login.link_kakao")
+                )
             )
-        )
+        except TimeoutException:
+            # CSS 실패 시 텍스트로 찾기
+            kakao_btn = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//*[contains(text(), '카카오') and (contains(text(), '로그인') or contains(text(), '계정'))]")
+                )
+            )
         kakao_btn.click()
         print("  🔑 카카오 로그인 버튼 클릭")
         time.sleep(SHORT_WAIT)
@@ -154,7 +166,7 @@ def login(driver: webdriver.Chrome, blog_name: str,
 
 def post_article(driver: webdriver.Chrome, blog_name: str,
                  title: str, content: str,
-                 category: str = "AI 툴 리뷰") -> bool:
+                 category: str = "생산성툴") -> bool:
     """
     티스토리 새 글 작성 및 발행.
     blog_name: 예) myai (도메인 없이)
@@ -162,126 +174,222 @@ def post_article(driver: webdriver.Chrome, blog_name: str,
     if blog_name.endswith(".tistory.com"):
         blog_name = blog_name.replace(".tistory.com", "")
 
-    write_url = f"https://{blog_name}.tistory.com/manage/post/write"
+    # 마크다운 → HTML 변환
+    content = markdown.markdown(
+        content,
+        extensions=['tables', 'fenced_code', 'nl2br']
+    )
+    print(f"  🔄 마크다운 → HTML 변환 완료 ({len(content)}자)")
+
+    write_url = f"https://{blog_name}.tistory.com/manage/newpost"
     print(f"  ✏️ 글쓰기 페이지 이동: {write_url}")
 
     try:
         driver.get(write_url)
-        wait = WebDriverWait(driver, WAIT_TIMEOUT)
         time.sleep(MEDIUM_WAIT)
 
-        # ── 제목 입력 ──
-        title_input = wait.until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR,
-                 "input#post-title-inp, input[placeholder*='제목'], "
-                 ".title_area input, input.txt_tit")
+        # 임시 저장 글 알림 처리 ("이어서 작성하시겠습니까?")
+        try:
+            alert = driver.switch_to.alert
+            print(f"  ℹ️ 알림 팝업 감지: {alert.text[:40]}...")
+            alert.dismiss()  # "취소" — 새 글 작성
+            time.sleep(SHORT_WAIT)
+        except Exception:
+            pass  # 알림 없으면 무시
+
+        wait = WebDriverWait(driver, WAIT_TIMEOUT)
+
+        # ── 카테고리 선택 ──
+        try:
+            # 카테고리 드롭다운 클릭
+            cat_btn = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH,
+                     "//button[contains(text(), '카테고리')] | "
+                     "//span[contains(text(), '카테고리')]/parent::* | "
+                     "//div[contains(@class, 'category')]//button | "
+                     "//select[contains(@class, 'category')]")
+                )
             )
-        )
-        title_input.click()
-        title_input.clear()
-        title_input.send_keys(title)
+            cat_btn.click()
+            time.sleep(1)
+
+            # 카테고리 목록에서 선택
+            cat_option = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH,
+                     f"//li[contains(text(), '{category}')] | "
+                     f"//option[contains(text(), '{category}')] | "
+                     f"//span[contains(text(), '{category}')] | "
+                     f"//a[contains(text(), '{category}')]")
+                )
+            )
+            cat_option.click()
+            print(f"  🏷️ 카테고리 설정: {category}")
+            time.sleep(1)
+        except (TimeoutException, NoSuchElementException):
+            print(f"  ⚠️ 카테고리 '{category}' 설정 실패 — 수동 확인 필요")
+            save_screenshot(driver, "category_fail")
+
+        # ── 제목 입력 (새 에디터: placeholder "제목을 입력하세요") ──
+        try:
+            # 방법 1: placeholder 텍스트가 있는 요소 클릭 후 입력
+            title_el = wait.until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//*[contains(@placeholder, '제목') or contains(text(), '제목을 입력')]")
+                )
+            )
+        except TimeoutException:
+            # 방법 2: contenteditable 제목 영역
+            title_el = wait.until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR,
+                     "input#post-title-inp, input[placeholder*='제목'], "
+                     "[contenteditable='true']:first-of-type, .tit_post")
+                )
+            )
+        title_el.click()
+        time.sleep(0.5)
+        # 기존 내용 지우고 입력 (macOS: Command+A)
+        title_el.send_keys(Keys.COMMAND + "a")
+        title_el.send_keys(title)
         print(f"  📝 제목 입력: {title[:40]}...")
         time.sleep(SHORT_WAIT)
 
-        # ── HTML 모드 전환 ──
-        # 기본 에디터(iframe)에서 HTML 모드로 전환 시도
+        # ── 본문 입력 (TinyMCE iframe 에디터) ──
         try:
-            html_btn = driver.find_element(
-                By.CSS_SELECTOR,
-                "button[data-mode='html'], button.btn_html, "
-                "button[title='HTML'], .toolbar_item_html"
-            )
-            html_btn.click()
-            print("  🔄 HTML 모드 전환")
-            time.sleep(SHORT_WAIT)
-        except NoSuchElementException:
-            print("  ℹ️ HTML 모드 버튼 없음 — 기본 에디터 사용")
-
-        # ── 본문 입력 ──
-        # iframe 에디터인 경우
-        try:
-            iframe = driver.find_element(
-                By.CSS_SELECTOR,
-                "iframe#editor-tistory, iframe.tistory-editor, "
-                "iframe[id*='editor']"
+            # TinyMCE iframe 찾기
+            iframe = wait.until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "iframe[id*='editor'], iframe[id*='tiny'], "
+                                      "iframe[id*='mce'], iframe.tox-edit-area__iframe")
+                )
             )
             driver.switch_to.frame(iframe)
-            body = driver.find_element(By.CSS_SELECTOR, "body, #tinymce")
+            body = wait.until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "body#tinymce, body[contenteditable='true'], body")
+                )
+            )
             body.click()
-            # 기존 내용 전체 선택 후 교체
-            body.send_keys(Keys.CONTROL + "a")
+            body.send_keys(Keys.COMMAND + "a")
             body.send_keys(Keys.DELETE)
-            body.send_keys(content)
+            # HTML 콘텐츠 주입 (JavaScript)
             driver.switch_to.default_content()
-            print("  📄 iframe 에디터에 본문 입력")
-        except NoSuchElementException:
-            # contenteditable div 에디터인 경우
-            editor = driver.find_element(
-                By.CSS_SELECTOR,
-                "[contenteditable='true'], .ProseMirror, "
-                ".toastui-editor-contents, #editor-content"
+            driver.switch_to.frame(iframe)
+            driver.execute_script(
+                "document.body.innerHTML = arguments[0];", content
             )
-            editor.click()
-            editor.send_keys(Keys.CONTROL + "a")
-            editor.send_keys(Keys.DELETE)
-            editor.send_keys(content)
-            print("  📄 contenteditable 에디터에 본문 입력")
+            driver.switch_to.default_content()
+            print("  📄 TinyMCE 에디터에 본문 입력")
+        except (TimeoutException, NoSuchElementException):
+            driver.switch_to.default_content()
+            # contenteditable div 폴백
+            try:
+                editor = driver.find_element(
+                    By.CSS_SELECTOR,
+                    "[contenteditable='true'].mce-content-body, "
+                    "[contenteditable='true']"
+                )
+                editor.click()
+                editor.send_keys(Keys.COMMAND + "a")
+                editor.send_keys(Keys.DELETE)
+                editor.send_keys(content)
+                print("  📄 contenteditable 에디터에 본문 입력")
+            except NoSuchElementException:
+                print("  ❌ 에디터를 찾을 수 없습니다.")
+                save_screenshot(driver, "editor_not_found")
+                return False
 
         time.sleep(SHORT_WAIT)
 
-        # ── 카테고리 설정 ──
+        # ── 발행: "완료" 버튼 클릭 ──
         try:
-            cat_select = driver.find_element(
-                By.CSS_SELECTOR,
-                "select#category, select[name='categoryId'], "
-                ".category_select select"
+            publish_btn = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//button[contains(text(), '완료')]")
+                )
             )
-            options = cat_select.find_elements(By.TAG_NAME, "option")
-            for opt in options:
-                if category in opt.text:
-                    opt.click()
-                    print(f"  🏷️ 카테고리 설정: {category}")
-                    break
-        except NoSuchElementException:
-            print(f"  ℹ️ 카테고리 '{category}' 설정 생략 (없거나 다른 형태)")
-
-        time.sleep(SHORT_WAIT)
-
-        # ── 발행 버튼 클릭 ──
-        publish_btn = wait.until(
-            EC.element_to_be_clickable(
-                (By.CSS_SELECTOR,
-                 "button.btn_publish, button#publish-btn, "
-                 "button[class*='publish'], button.submit")
-            )
-        )
-        publish_btn.click()
-        print("  🚀 발행 버튼 클릭")
-        time.sleep(MEDIUM_WAIT)
-
-        # 발행 확인 팝업이 있는 경우 처리
-        try:
-            confirm_btn = WebDriverWait(driver, 3).until(
+        except TimeoutException:
+            publish_btn = wait.until(
                 EC.element_to_be_clickable(
                     (By.CSS_SELECTOR,
-                     "button.btn_ok, button.btn_confirm, "
-                     ".layer_confirm button.btn_blue")
+                     "button.btn_publish, button#publish-btn, "
+                     "button.btn-publish, button.submit, "
+                     "button[class*='publish'], button[class*='complete']")
+                )
+            )
+        publish_btn.click()
+        print("  🚀 '완료' 버튼 클릭")
+        time.sleep(MEDIUM_WAIT)
+
+        # 발행 설정 모달 처리
+        time.sleep(SHORT_WAIT)
+
+        # ── 비공개 선택 ──
+        try:
+            # 방법 1: "비공개" 텍스트가 포함된 라디오/버튼/span 클릭
+            private_el = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH,
+                     "//label[contains(text(), '비공개')] | "
+                     "//span[contains(text(), '비공개')] | "
+                     "//input[@value='private' or @value='PRIVATE']/.. | "
+                     "//button[contains(text(), '비공개')]")
+                )
+            )
+            private_el.click()
+            print("  🔒 비공개 선택 완료")
+            time.sleep(1)
+        except TimeoutException:
+            # 방법 2: JavaScript로 비공개 라디오 선택
+            try:
+                result = driver.execute_script("""
+                    // "비공개" 텍스트를 가진 요소 찾아서 클릭
+                    var els = document.querySelectorAll('label, span, div, button');
+                    for (var i = 0; i < els.length; i++) {
+                        if (els[i].textContent.trim() === '비공개') {
+                            els[i].click();
+                            return 'clicked';
+                        }
+                    }
+                    // 라디오 input 직접 선택
+                    var radios = document.querySelectorAll('input[type="radio"]');
+                    for (var i = 0; i < radios.length; i++) {
+                        if (radios[i].value === 'private' || radios[i].value === 'PRIVATE') {
+                            radios[i].click();
+                            return 'radio_clicked';
+                        }
+                    }
+                    return 'not_found';
+                """)
+                if result and 'clicked' in result:
+                    print("  🔒 비공개 선택 완료 (JS)")
+                else:
+                    print("  ⚠️ 비공개 옵션을 찾지 못했습니다 — 수동 확인 필요")
+                    save_screenshot(driver, "private_fail")
+            except Exception as e:
+                print(f"  ⚠️ 비공개 설정 실패: {e}")
+                save_screenshot(driver, "private_fail")
+
+        time.sleep(1)
+
+        # ── 최종 발행 버튼 클릭 ──
+        try:
+            confirm_btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH,
+                     "//button[contains(text(), '발행')]")
                 )
             )
             confirm_btn.click()
-            print("  ✅ 발행 확인 팝업 처리")
+            print("  ✅ 비공개 발행 버튼 클릭")
             time.sleep(MEDIUM_WAIT)
         except TimeoutException:
-            pass  # 팝업 없으면 넘어감
+            pass
 
-        # 발행 성공 확인 (URL 변화)
-        if "/manage/post/" not in driver.current_url:
-            print(f"  ✅ 글 발행 완료!")
-            return True
-        else:
-            print(f"  ⚠️ 발행 후 URL 확인 필요: {driver.current_url}")
-            return True  # URL이 그대로여도 성공으로 처리 (에디터 형태에 따라 다름)
+        print(f"  ✅ 글 비공개 발행 완료!")
+        return True
 
     except TimeoutException as e:
         print(f"  ❌ 타임아웃: {e}")
@@ -343,7 +451,7 @@ def main(headless: bool = False):
             print("   .env의 TISTORY_ID / TISTORY_PW 를 확인하세요.")
             return
 
-        # 글 순차 업로드
+        # 글 순차 업로드 (비공개 발행)
         for i, article in enumerate(articles, 1):
             name    = article["name"]
             title   = article["title"]

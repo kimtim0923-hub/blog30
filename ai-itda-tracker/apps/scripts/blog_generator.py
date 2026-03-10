@@ -1,18 +1,23 @@
 """
 blog_generator.py — Claude API로 블로그 글 자동 생성
-역할: sheets_client에서 타겟 ✅ 툴을 읽어 6가지 유형(B/C/D/E) 중 하나를
-      랜덤으로 선택해 블로그 초안을 생성하고, 결과를 Google Sheets
-      '블로그 콘텐츠' 시트에 저장한다. (A=키워드리서치, F=SEO마무리는 제외)
+역할: sheets_client에서 타겟 ✅ 툴을 읽어 SKILL.md 규칙에 따라
+      적합한 유형(B/C/D/E)을 선택해 블로그 초안을 생성하고, 결과를
+      Google Sheets '블로그 콘텐츠' 시트에 저장한다.
 
-유형 가중치 (같은 ai_category 동료 툴 수에 따라 동적 조정):
-  B(리뷰): 40% / C(비교): 20% / D(대안): 20% / E(순위): 20%
-  동료 부족 시 해당 가중치는 B로 귀속
+유형 선택 규칙 (SKILL.md 기준):
+  - 신규 툴(출시 3개월 미만): 무조건 B(리뷰)
+  - C(비교): 두 툴 모두 출시 6개월 이상 + 공개 리뷰 충분
+  - D(대안): 원본 유명 툴 + 대안 전원 출시 6개월 이상
+  - E(순위): 5개 이상 모두 출시 6개월 이상
+  현재 수집 툴 대부분 신규 → B유형 위주 생성
 
 실행: python blog_generator.py
 """
 
 import os
+import re
 import random
+import sys
 import time
 from pathlib import Path
 
@@ -66,6 +71,22 @@ def _peers(tool: dict, all_tools: list[dict]) -> list[dict]:
     ]
 
 
+def _is_new_tool(released: str, threshold_days: int = 90) -> bool:
+    """출시일 문자열에서 신규 툴 여부 판단 (3개월 미만 = True)."""
+    if not released:
+        return True  # 정보 없으면 신규로 간주
+    m = re.search(r"(\d+)\s*d\s*ago", released, re.IGNORECASE)
+    if m:
+        return int(m.group(1)) < threshold_days
+    m = re.search(r"(\d+)\s*mo\s*ago", released, re.IGNORECASE)
+    if m:
+        return int(m.group(1)) < 3
+    m = re.search(r"(\d+)\s*y\s*ago", released, re.IGNORECASE)
+    if m:
+        return False  # 1년 이상이면 신규 아님
+    return True  # 파싱 실패 시 신규로 간주
+
+
 # ──────────────────────────────────────────────────────
 # 공통 규칙 (모든 프롬프트에 포함)
 # ──────────────────────────────────────────────────────
@@ -78,9 +99,24 @@ _COMMON_RULES = """
 - **가격 표기**: $12/월 (≈₩16,000/월) — 달러+원화 반드시 병기
 - **금지 표현**: "~인 것 같습니다", "아마도", "~인 듯합니다" (단정 표현만 사용)
 - **이미지 태그**: [이미지: 설명] 형식으로 3곳 이상 배치
-- **1인칭 경험 표현**: "제가 직접 써봤을 때", "테스트해보니" 포함
 - **문장 길이**: 2~3줄 이내, 단락 4줄 이내로 끊기
 - **SEO 구조**: H1 1개(메인 키워드 포함), H2 4~6개(보조 키워드 포함)
+- **첫 100자 안에 메인 키워드 삽입**, 키워드 밀도 1.5~2.5%
+"""
+
+_NEW_TOOL_RULES = """
+## 신규 툴(출시 3개월 미만) 작성 규칙 — 반드시 준수
+- **1인칭 체험 표현 절대 금지**: "직접 써봤는데", "테스트해보니", "써봤을 때" 등 사용 불가
+- **대신 사용할 표현**: "공식 소개에 따르면", "공개된 기능 기준으로", "공식 사이트 기준"
+- **확인 불가 품질 단정 금지**: "한국어 품질 준수", "정확도 최고", "성능이 뛰어나다" 등 작성 불가
+- **가격·URL은 제공된 공식 정보 기준으로만** 작성 (추정·날조 금지)
+- **존재 여부 불확실한 기능**은 "공식 소개에 따르면 ~을 지원한다"로 표현
+"""
+
+_VERIFIED_TOOL_RULES = """
+## 검증된 툴(출시 6개월 이상) 작성 규칙
+- 1인칭 체험 표현("써봤는데", "테스트해보니") 사용 가능 — 단, 공개 리뷰·데이터로 검증된 정보에만
+- 확인 불가한 품질 단정은 여전히 금지
 """
 
 
@@ -98,6 +134,16 @@ def build_prompt_B(tool: dict) -> str:
     released = tool.get("released", "")
     utm_url  = _utm(name)
     p_note   = _price_note(price)
+    is_new   = _is_new_tool(released)
+
+    # 신규 vs 검증 툴에 따라 문체 규칙 분기
+    tone_rules = _NEW_TOOL_RULES if is_new else _VERIFIED_TOOL_RULES
+    title_suffix = "공식 기능 총정리" if is_new else "실제로 써보니 이랬습니다"
+    experience_instruction = (
+        "각 기능: 소제목 + 150자 설명 + '공식 소개에 따르면' 표현 사용 + 수치 포함"
+        if is_new else
+        "각 기능: 소제목 + 150자 설명 + 1인칭 경험 + 수치 포함"
+    )
 
     return f"""당신은 AI있다(ai-itda.com) 블로그의 전문 에디터입니다.
 아래 AI 툴에 대해 한국 영상/글 크리에이터를 타겟으로 하는 SEO 최적화 리뷰 글을 작성하세요.
@@ -110,13 +156,15 @@ def build_prompt_B(tool: dict) -> str:
 - 저장수(인기 지표): {saves}
 - 출시: {released}
 - 어필리에이트 URL: {utm_url}
+- **신규 툴 여부**: {"⚠️ 신규 (출시 3개월 미만) — 체험 표현 금지" if is_new else "✅ 검증됨 (출시 6개월 이상)"}
 {_COMMON_RULES}
+{tone_rules}
 ## 글 구조 (순서대로 모두 포함, 목표 2,500~3,000자)
 
 > 이 글에는 제휴 링크가 포함되어 있습니다.
 
 ### H1 제목 형식
-{name} 리뷰: [tagline 핵심 혜택 한국어 요약], 실제로 써보니 이랬습니다 (2026)
+{name} 리뷰: [tagline 핵심 혜택 한국어 요약], {title_suffix} (2026)
 
 ### 3줄 요약 (결론 먼저)
 - **이런 분께 추천**: (구체적 타겟 1줄)
@@ -128,17 +176,19 @@ def build_prompt_B(tool: dict) -> str:
 200자 이내 간결한 소개.
 
 ### 핵심 기능 3가지 (H2)
-각 기능: 소제목 + 150자 설명 + 1인칭 경험 + 수치 포함
+{experience_instruction}
 [이미지: 기능 화면] 태그 삽입
 [CTA 버튼] 텍스트: "{name} 기능 확인하기 →" → {utm_url}
 
 ### 가격 및 플랜 비교 (H2)
 마크다운 표: | 플랜 | 월 비용 | 포함 기능 | 추천 대상 |
 USD + KRW 병기, 무료 체험 여부 명시
+**제공된 가격 정보만 사용하고 추정하지 마세요.**
 [CTA 버튼] 텍스트: "{name} 가격 확인하기 →" → {utm_url}
 
 ### 솔직한 장단점 (H2)
 ✅ 장점 3~4개 / ❌ 단점 2~3개 (솔직하게)
+{"장단점은 공식 소개·기능 설명 기준으로만 작성. 체험 기반 표현 금지." if is_new else ""}
 
 ### 어떤 사람에게 적합한가? (H2)
 한국 크리에이터 맥락의 구체적 사용 시나리오 3가지
@@ -148,6 +198,7 @@ USD + KRW 병기, 무료 체험 여부 명시
 
 ### 최종 평점 및 결론 (H2)
 마크다운 표: | 항목 | 평점 | (기능 완성도/가성비/사용 편의성/한국어 지원/종합)
+{"평점은 공식 기능과 가격 기준으로 산정. 체험 없이 확인 불가한 항목은 '확인 필요'로 표기." if is_new else ""}
 2~3문장 최종 결론
 [CTA 버튼] 텍스트: "{name} 지금 시작하기 →" → {utm_url}
 
@@ -355,12 +406,24 @@ def build_prompt_E(tools: list[dict]) -> str:
 
 def select_blog_type(tool: dict, all_tools: list[dict]) -> str:
     """
-    같은 ai_category 동료 수에 따라 가중 랜덤으로 블로그 유형 선택.
-    B=40% / C=20%(peer≥1) / D=20%(peer≥2) / E=20%(peer≥3)
-    부적격 가중치는 B로 귀속.
+    SKILL.md 규칙에 따라 블로그 유형 선택.
+    - 신규 툴(출시 3개월 미만): 무조건 B
+    - C: 비교 대상 모두 출시 6개월 이상
+    - D: 원본 유명 + 대안 전원 출시 6개월 이상
+    - E: 5개 이상 모두 출시 6개월 이상
     반환: "B" | "C" | "D" | "E"
     """
-    peer_count = len(_peers(tool, all_tools))
+    released = tool.get("released", "")
+
+    # 신규 툴은 무조건 B
+    if _is_new_tool(released):
+        print(f"  📝 블로그 유형 선택: B (신규 툴 — 출시 3개월 미만, '{released}')")
+        return "B"
+
+    # 검증된 툴: 동료 상태에 따라 C/D/E 가능
+    peers = _peers(tool, all_tools)
+    verified_peers = [p for p in peers if not _is_new_tool(p.get("released", ""))]
+    peer_count = len(verified_peers)
 
     weights = {"B": 40, "C": 0, "D": 0, "E": 0}
 
@@ -374,7 +437,7 @@ def select_blog_type(tool: dict, all_tools: list[dict]) -> str:
     else:
         weights["B"] += 20
 
-    if peer_count >= 3:
+    if peer_count >= 4:  # E는 5개 이상 필요
         weights["E"] = 20
     else:
         weights["B"] += 20
@@ -383,7 +446,7 @@ def select_blog_type(tool: dict, all_tools: list[dict]) -> str:
     probs  = [weights[t] for t in types]
     chosen = random.choices(types, weights=probs, k=1)[0]
 
-    print(f"  📝 블로그 유형 선택: {chosen} (동료 {peer_count}개, 가중치 B:{weights['B']} C:{weights['C']} D:{weights['D']} E:{weights['E']})")
+    print(f"  📝 블로그 유형 선택: {chosen} (검증된 동료 {peer_count}개, 가중치 B:{weights['B']} C:{weights['C']} D:{weights['D']} E:{weights['E']})")
     return chosen
 
 
@@ -459,8 +522,17 @@ def generate_blog(
 
 def main():
     """타겟 ✅ + 미작성 툴을 순차적으로 블로그 생성 후 Sheets에 저장."""
+    # --limit N 옵션: 최대 N개만 생성
+    limit = None
+    if "--limit" in sys.argv:
+        idx = sys.argv.index("--limit")
+        if idx + 1 < len(sys.argv):
+            limit = int(sys.argv[idx + 1])
+
     print("=" * 55)
     print("blog_generator.py — 블로그 자동 생성 시작")
+    if limit:
+        print(f"  (최대 {limit}개 제한)")
     print("=" * 55)
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -475,6 +547,10 @@ def main():
     if not tools:
         print("✅ 생성할 블로그가 없습니다 (타겟 + 미작성 툴 없음).")
         return
+
+    if limit:
+        tools = tools[:limit]
+        print(f"📋 {limit}개로 제한: {', '.join(t['name'] for t in tools)}")
 
     success_count = 0
     fail_count    = 0

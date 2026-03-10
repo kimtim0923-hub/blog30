@@ -2,6 +2,7 @@
 .env
 *.env
 credentials.json
+config.js
 *credentials*.json
 *.pem
 *.key

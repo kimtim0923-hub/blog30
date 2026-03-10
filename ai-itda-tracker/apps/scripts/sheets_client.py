@@ -78,7 +78,7 @@ class SheetsClient:
         툴 DB에서 AI있다 타겟 ✅ + 블로그 미작성 항목만 반환.
         반환: [{ name, tagline, taaft_category, ai_category, price, released, saves, row_index }, ...]
         """
-        sheet = self.spreadsheet.worksheet("툴 DB")
+        sheet = self.spreadsheet.worksheet("📦 툴 DB")
         rows = sheet.get_all_values()
 
         if len(rows) <= 1:
@@ -122,7 +122,7 @@ class SheetsClient:
         status: "미작성" | "생성중" | "글완성" | "생성오류" | "업로드완료" | "업로드오류"
         """
         try:
-            sheet = self.spreadsheet.worksheet("툴 DB")
+            sheet = self.spreadsheet.worksheet("📦 툴 DB")
             cell = sheet.find(tool_name, in_column=COL_NAME + 1)  # gspread는 1-based
             if cell is None:
                 print(f"⚠️ 툴을 찾을 수 없음: {tool_name}")

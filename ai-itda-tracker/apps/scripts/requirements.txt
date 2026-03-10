@@ -13,5 +13,8 @@ anthropic>=0.25.0
 selenium>=4.15.0
 webdriver-manager>=4.0.1
 
+# 마크다운 → HTML 변환
+markdown>=3.5.0
+
 # 환경변수 관리
 python-dotenv>=1.0.0
