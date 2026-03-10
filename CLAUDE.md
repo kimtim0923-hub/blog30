@@ -75,12 +75,21 @@ gas/tracker.gs         ← Google Apps Script 백업 (빈 파일)
 - [x] tistory_uploader.py 로그인 성공
 - [x] tistory_uploader.py 카테고리 "생산성툴" 설정 성공
 - [x] 마크다운 → HTML 변환 (markdown 라이브러리) 적용
-- [ ] **tistory_uploader.py 비공개 글 저장 방식으로 변경 필요**
-  - 현재: "공개 발행" 클릭 → 즉시 공개됨
-  - 변경: "비공개" 선택 후 발행 → 비공개로 저장
-  - 발행 모달 구조: 기본(공개/공개보호/비공개) + 발행일 + 공개발행 버튼
+- [x] tistory_uploader.py 비공개 발행 + 예약/공개 파라미터 추가
 - [ ] 나머지 13개 툴 블로그 생성 (blog_generator.py)
 - [ ] 전체 배치 업로드 테스트
+
+### Phase 4 — FastAPI 백엔드 서버
+- [x] api_server.py 생성 (FastAPI + CORS)
+- [x] Sheets 엔드포인트 (/api/tools, /api/blog/list 등)
+- [x] 블로그 생성 엔드포인트 (단일 + 배치)
+- [x] 티스토리 업로드 엔드포인트 (비공개/공개/예약 지원)
+- [x] tistory_uploader.py에 visibility + schedule 파라미터 추가
+- [x] CORS 설정 (localhost:3000/5500/8080 + file://)
+- [x] 로컬 테스트 통과 (전체 엔드포인트 200 OK)
+- [ ] 프론트엔드 통합 테스트
+
+> ✅ **Phase 4 백엔드 완료** (2026-03-11)
 
 ### 티스토리 에디터 참고 (새 에디터, 2026년 기준)
 - **글쓰기 URL:** `https://buu2.tistory.com/manage/newpost`
@@ -110,15 +119,108 @@ python3 blog_generator.py
 python3 tistory_uploader.py
 ```
 
-## 터미널 1 이어서 할 작업
+## 터미널 1 — 백엔드 (Phase 4-BE)
+> 담당: Python API 서버 + 백엔드 로직 (apps/scripts/)
+> 터미널 2(프론트)가 호출할 API 엔드포인트를 만드는 역할
+
+### 담당 파일
+- `apps/scripts/api_server.py` ← **신규** FastAPI 서버
+- `apps/scripts/blog_generator.py` ← API로 래핑
+- `apps/scripts/tistory_uploader.py` ← API로 래핑 (예약 시간 파라미터 추가)
+- `apps/scripts/sheets_client.py` ← 기존 유지
+
+### 할 일 (순서대로)
+1. **FastAPI 서버 구축** (`api_server.py`)
+   - `pip install fastapi uvicorn` 추가
+   - CORS 허용 (localhost 웹앱에서 호출)
+2. **API 엔드포인트 구현**
+   - `GET /api/tools` — 타겟 툴 목록 조회 (sheets_client.get_target_tools)
+   - `GET /api/blog/ready` — 업로드 대기 글 목록 (sheets_client.get_ready_to_upload)
+   - `POST /api/blog/generate` — 블로그 생성 트리거 (tool_name, blog_type)
+   - `POST /api/tistory/upload` — 티스토리 업로드 (tool_name, visibility, schedule_datetime)
+3. **tistory_uploader.py 예약 기능 복원**
+   - UI에서 받은 schedule_datetime으로 예약 발행
+   - visibility: "공개" | "비공개" 선택 가능
+4. **서버 실행 및 테스트**
+   - `uvicorn api_server:app --reload --port 8000`
+
+### 터미널 1에서 시작할 명령
 ```
-CLAUDE.md 읽고, tistory_uploader.py를 수정해줘:
-1. 발행 모달에서 "비공개" 라디오 선택 후 발행 (예약 로직 제거)
-2. 예약 관련 코드(schedule_date, schedule_time) 전부 제거
-3. Idea2Clip 상태 리셋 후 테스트: python3 -c "from sheets_client import SheetsClient; s=SheetsClient(); s.update_upload_status('Idea2Clip','글완성'); s.update_blog_status('Idea2Clip','글완성')"
-4. python3 tistory_uploader.py 실행하여 비공개 저장 확인
-5. 성공 시 나머지 13개 blog_generator.py 실행
+CLAUDE.md 읽고, Phase 4 백엔드를 진행해줘:
+1. apps/scripts/에 FastAPI 서버(api_server.py) 생성
+2. sheets_client, blog_generator, tistory_uploader를 API 엔드포인트로 래핑
+3. tistory_uploader.py에 예약 시간 + 공개/비공개 파라미터 추가
+4. CORS 설정 후 로컬 테스트
+5. 터미널 2(프론트)가 fetch()로 호출할 수 있도록 엔드포인트 문서화
 ```
+
+---
+
+## 터미널 2 — 프론트엔드 (Phase 4-FE)
+> 담당: 웹앱 UI 대시보드 (apps/webapp/)
+> 터미널 1(백엔드)이 만든 API를 호출하는 역할
+
+### 담당 파일
+- `apps/webapp/index.html` ← UI 레이아웃 확장
+- `apps/webapp/js/ui.js` ← UI 인터랙션 확장
+- `apps/webapp/js/main.js` ← 이벤트 바인딩 확장
+- `apps/webapp/js/api.js` ← **신규** 백엔드 API 호출 모듈
+- `apps/webapp/css/` ← 스타일 확장
+
+### 할 일 (순서대로)
+1. **대시보드 레이아웃 설계** (탭 or 섹션 구조)
+   - 탭1: 데이터 입력 + 파싱 (기존)
+   - 탭2: 시트 연동 (파싱 결과 → 시트 자동 입력)
+   - 탭3: 블로그 생성 (타겟 툴 목록 + 생성 버튼 + 미리보기) — **미작성 + 글완성(미업로드) 모두 표시**
+   - 탭4: 이미지 삽입 (생성된 글의 [이미지: 설명] 태그를 파싱 → 드롭존 표시 → 사용자가 이미지 드래그앤드롭)
+   - 탭5: 티스토리 업로드 (글 목록 + 예약시간 입력 + 업로드)
+2. **api.js 작성** — 백엔드 API 호출 래퍼
+   - `API_BASE = 'http://localhost:8000'`
+   - `fetchTools()`, `generateBlog()`, `uploadToTistory()` 등
+3. **각 탭 UI 구현**
+   - 탭1: 기존 유지
+   - 탭2: Sheets 연동 버튼 + 결과 표시
+   - 탭3: 툴 목록 (미작성 + 글완성 모두 표시, 상태 뱃지로 구분) + 유형 드롭다운 + 생성 버튼 + 진행률 + 미리보기
+   - 탭4: 이미지 삽입 UI (아래 상세 참조)
+   - 탭5: **글 선택 드롭다운/체크박스** (이미지 적용 완료된 글 목록) + 날짜/시간 picker + 공개/비공개 라디오 + 업로드 버튼
+4. **탭4 이미지 삽입 — 상세 흐름**
+   - 블로그 생성 완료 후 → 글 내용에서 `[이미지: 설명]` 태그를 자동 파싱
+   - 각 태그마다 드롭존(dropzone) UI 생성: "설명" 텍스트 + 파일 드래그앤드롭 영역
+   - 사용자가 캡처/로컬 이미지를 각 드롭존에 드래그앤드롭
+   - 이미지 미리보기 표시 + 순서 확인
+   - "이미지 적용" 버튼 → `[이미지: 설명]` 태그를 실제 `<img>` 태그로 교체
+   - 이미지 파일은 Base64 인코딩 또는 백엔드 `/api/upload/image` 엔드포인트로 업로드
+   - 최종 결과: 이미지 포함된 HTML 블로그 글 완성 → 티스토리 업로드 준비
+5. **백엔드 API 연동 테스트**
+
+### 터미널 2에서 시작할 명령
+```
+CLAUDE.md 읽고, Phase 4 프론트엔드를 진행해줘:
+1. apps/webapp/ 기존 코드 읽고 구조 파악
+2. 탭 기반 대시보드로 index.html 확장 (5개 탭)
+3. api.js 신규 작성 (백엔드 http://localhost:8000 호출)
+4. 탭1(데이터 입력)은 기존 유지, 탭2~5 순차 구현
+5. 백엔드 API가 아직 없으면 목업 데이터로 UI 먼저 완성
+```
+
+---
+
+### Phase 4 API 인터페이스 (터미널 1↔2 공유 규약)
+```
+GET  /api/tools              → [{ name, tagline, category, price, blog_status, ... }]
+                               ⚠️ 미작성 + 글완성(미업로드) 모두 반환 (blog_status로 구분)
+GET  /api/blog/ready         → [{ name, title, content, blog_type, has_images, ... }]
+                               ⚠️ 이미지 적용 완료 여부(has_images) 포함
+POST /api/blog/generate      → { tool_name, blog_type? }  → { title, content }
+POST /api/tistory/upload     → { tool_name, visibility, schedule_datetime? } → { success, message }
+POST /api/upload/image       → multipart/form-data (file) → { url, filename }
+POST /api/blog/apply-images  → { tool_name, images: [{ tag, image_url }] } → 글 내용의 [이미지:] 태그를 <img>로 교체 후 저장
+```
+
+## 미해결 이슈
+- [ ] **웹앱 Google Sheets API 403 오류**: API 키(`AIzaSyB2d...`)로 Discovery 문서 로드 시 403 Forbidden
+  - 원인: Google Cloud Console에서 Google Sheets API 미활성화 또는 API 키 제한 설정
+  - 해결: Console → APIs & Services → Google Sheets API Enable + API 키 제한 해제
 
 ## 환경변수 목록
 | 변수명 | 용도 |

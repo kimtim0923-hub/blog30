@@ -19,51 +19,262 @@
   <!-- 헤더 -->
   <header class="header">
     <div class="header__logo">AI있다 TAAFT Tracker</div>
-    <div class="header__auth">
-      <button id="btn-sign-in" class="btn btn--primary">Google 로그인</button>
-      <button id="btn-sign-out" class="btn btn--secondary" hidden>로그아웃</button>
+    <div class="header__right">
+      <span id="connection-dot" class="dot dot--off" title="백엔드 연결 상태"></span>
+      <button id="btn-sign-in" class="btn btn--primary btn--sm">Google 로그인</button>
+      <button id="btn-sign-out" class="btn btn--secondary btn--sm" hidden>로그아웃</button>
     </div>
   </header>
 
-  <!-- 메인 2컬럼 -->
-  <main class="main">
-    <!-- 좌측: 데이터 입력 -->
-    <section class="panel panel--input">
-      <h2>데이터 입력</h2>
-      <textarea id="raw-input" class="textarea"
-        placeholder="TAAFT 데이터를 여기에 붙여넣기...&#10;&#10;지원 형식:&#10;1. ToolName - Tagline&#10;   Category: X | Price: Y | Saves: Z&#10;&#10;또는 탭으로 구분된 테이블"></textarea>
-      <button id="btn-parse" class="btn btn--primary">파싱하기</button>
-    </section>
+  <!-- 탭 내비게이션 -->
+  <nav class="tab-nav">
+    <button class="tab-nav__btn active" data-tab="input">1. 데이터 입력</button>
+    <button class="tab-nav__btn" data-tab="sheets">2. Sheets 저장</button>
+    <button class="tab-nav__btn" data-tab="blog">3. 글 생성</button>
+    <button class="tab-nav__btn" data-tab="image">4. 이미지 삽입</button>
+    <button class="tab-nav__btn" data-tab="upload">5. 티스토리 업로드</button>
+  </nav>
 
-    <!-- 우측: 파싱 결과 미리보기 -->
-    <section class="panel panel--preview">
-      <h2>파싱 결과</h2>
-      <div id="preview-area" class="preview preview--empty">
-        TAAFT 데이터를 붙여넣고 "파싱하기" 버튼을 클릭하세요
+  <!-- 메인 -->
+  <main class="main">
+
+    <!-- ═══ 탭 1: 데이터 입력 + 파싱 ═══ -->
+    <section id="tab-input" class="tab-panel active">
+      <div class="two-col">
+        <!-- 좌: 입력 -->
+        <div class="panel">
+          <h2>데이터 입력</h2>
+          <textarea id="raw-input" class="textarea"
+            placeholder="TAAFT 데이터를 여기에 붙여넣기...&#10;&#10;지원 형식:&#10;1. ToolName - Tagline&#10;   Category: X | Price: Y | Saves: Z&#10;&#10;또는 탭으로 구분된 테이블"></textarea>
+          <button id="btn-parse" class="btn btn--primary">파싱하기</button>
+        </div>
+        <!-- 우: 결과 -->
+        <div class="panel">
+          <div class="panel__header">
+            <h2>파싱 결과</h2>
+            <span id="parse-count" class="badge" hidden>0개</span>
+          </div>
+          <div id="preview-area" class="preview preview--empty">
+            TAAFT 데이터를 붙여넣고 "파싱하기"를 클릭하세요
+          </div>
+        </div>
       </div>
     </section>
+
+    <!-- ═══ 탭 2: Sheets 저장 ═══ -->
+    <section id="tab-sheets" class="tab-panel">
+      <div class="panel panel--wide">
+        <h2>Google Sheets 저장</h2>
+        <p class="desc">파싱된 데이터를 스프레드시트에 기록합니다.</p>
+
+        <!-- 연결 상태 -->
+        <div class="card card--status" id="sheets-conn">
+          <span class="dot dot--off" id="sheets-dot"></span>
+          <div>
+            <strong id="sheets-conn-title">연결 안 됨</strong>
+            <small id="sheets-conn-desc">Google 로그인 후 사용 가능</small>
+          </div>
+        </div>
+
+        <!-- 저장 옵션 -->
+        <div class="check-group">
+          <label class="check-card">
+            <input type="checkbox" id="chk-weekly-log" checked>
+            <span>📅 주간 로그에 추가</span>
+          </label>
+          <label class="check-card">
+            <input type="checkbox" id="chk-tool-db" checked>
+            <span>📦 툴 DB 업데이트 (신규 추가 + 저장수 갱신)</span>
+          </label>
+        </div>
+
+        <button id="btn-save-sheets" class="btn btn--success btn--full" disabled>시트에 저장</button>
+
+        <!-- 결과 -->
+        <div id="sheets-result" class="result-box" hidden></div>
+      </div>
+    </section>
+
+    <!-- ═══ 탭 3: 블로그 글 생성 ═══ -->
+    <section id="tab-blog" class="tab-panel">
+      <div class="two-col">
+        <!-- 좌: 설정 -->
+        <div class="panel">
+          <h2>블로그 생성 설정</h2>
+
+          <div class="field">
+            <label class="label">대상 선택</label>
+            <select id="blog-target" class="select">
+              <option value="parsed">파싱된 툴 목록</option>
+              <option value="sheet">시트에서 타겟(✅) 미작성 가져오기</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="label">글 유형</label>
+            <select id="blog-type" class="select">
+              <option value="auto">자동 (SKILL.md 규칙)</option>
+              <option value="B">B — 단일 리뷰</option>
+              <option value="C">C — 비교 글</option>
+              <option value="D">D — 대안 소개</option>
+              <option value="E">E — 순위 글</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="label">최대 생성 수</label>
+            <input id="blog-limit" class="input" type="number" value="3" min="1" max="20">
+          </div>
+
+          <button id="btn-generate-blog" class="btn btn--success btn--full">블로그 생성 시작</button>
+
+          <!-- 진행률 -->
+          <div id="blog-progress" class="progress-box" hidden>
+            <div class="progress-bar"><div id="blog-bar" class="progress-bar__fill"></div></div>
+            <small id="blog-progress-text">준비 중...</small>
+          </div>
+        </div>
+
+        <!-- 우: 미리보기 -->
+        <div class="panel">
+          <div class="panel__header">
+            <h2>생성 결과</h2>
+            <span id="blog-count" class="badge" hidden>0개</span>
+          </div>
+          <div id="blog-list" class="blog-list">
+            <div class="preview--empty">글 생성을 시작하면 여기에 결과가 표시됩니다</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ 탭 4: 이미지 삽입 ═══ -->
+    <section id="tab-image" class="tab-panel">
+      <div class="panel panel--wide-lg">
+        <h2>이미지 삽입</h2>
+        <p class="desc">생성된 글에서 [이미지: 설명] 태그를 파싱하고, 각 위치에 로컬 이미지를 드래그하세요.</p>
+
+        <!-- 글 선택 -->
+        <div class="field">
+          <label class="label">대상 글 선택</label>
+          <select id="image-blog-select" class="select">
+            <option value="">글을 선택하세요...</option>
+          </select>
+        </div>
+
+        <!-- 이미지 슬롯 (동적 생성) -->
+        <div id="image-slots" class="image-slots">
+          <div class="preview--empty">글을 선택하면 이미지 태그가 여기에 표시됩니다</div>
+        </div>
+
+        <!-- 액션 -->
+        <div class="image-actions" id="image-actions" hidden>
+          <button id="btn-apply-images" class="btn btn--success btn--full" disabled>이미지 적용 (태그 → &lt;img&gt; 교체)</button>
+          <div id="image-progress" class="progress-box" hidden>
+            <div class="progress-bar"><div id="image-bar" class="progress-bar__fill"></div></div>
+            <small id="image-progress-text">준비 중...</small>
+          </div>
+        </div>
+
+        <!-- 적용 결과 미리보기 -->
+        <div id="image-result" class="result-box" hidden></div>
+      </div>
+    </section>
+
+    <!-- ═══ 탭 5: 티스토리 업로드 ═══ -->
+    <section id="tab-upload" class="tab-panel">
+      <div class="two-col">
+        <!-- 좌: 설정 -->
+        <div class="panel">
+          <h2>티스토리 업로드</h2>
+
+          <!-- 업로드할 글 선택 -->
+          <div class="field">
+            <label class="label">업로드할 글 선택</label>
+            <div class="upload-select-actions" style="display:flex;gap:8px;margin-bottom:8px;">
+              <button id="btn-select-all" class="btn btn--secondary btn--sm" type="button">전체 선택</button>
+              <button id="btn-deselect-all" class="btn btn--secondary btn--sm" type="button">전체 해제</button>
+            </div>
+            <div id="upload-checklist" class="upload-checklist">
+              <div class="preview--empty">탭3에서 블로그를 생성하면 여기에 선택 목록이 표시됩니다</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="label">발행 방식</label>
+            <select id="publish-mode" class="select">
+              <option value="draft">임시저장 (비공개)</option>
+              <option value="schedule">예약 발행</option>
+              <option value="publish">즉시 발행</option>
+            </select>
+          </div>
+
+          <!-- 예약 옵션 -->
+          <div id="schedule-options" class="schedule-group" hidden>
+            <div class="field">
+              <label class="label">예약 시작 날짜</label>
+              <input id="schedule-date" class="input" type="date">
+            </div>
+            <div class="field">
+              <label class="label">예약 시작 시간</label>
+              <input id="schedule-time" class="input" type="time" value="09:00">
+            </div>
+            <div class="field">
+              <label class="label">글 간격</label>
+              <select id="schedule-interval" class="select">
+                <option value="0">동시</option>
+                <option value="60">1시간</option>
+                <option value="120" selected>2시간</option>
+                <option value="1440">1일</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="label">카테고리</label>
+            <select id="tistory-category" class="select">
+              <option value="">선택...</option>
+            </select>
+          </div>
+
+          <button id="btn-upload" class="btn btn--success btn--full">업로드 실행</button>
+
+          <div id="upload-progress" class="progress-box" hidden>
+            <div class="progress-bar"><div id="upload-bar" class="progress-bar__fill"></div></div>
+            <small id="upload-progress-text">준비 중...</small>
+          </div>
+        </div>
+
+        <!-- 우: 업로드 결과 -->
+        <div class="panel">
+          <div class="panel__header">
+            <h2>업로드 결과</h2>
+            <span id="upload-count" class="badge" hidden>0개</span>
+          </div>
+          <div id="upload-list" class="upload-list">
+            <div class="preview--empty">업로드를 실행하면 여기에 결과가 표시됩니다</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
-  <!-- 액션 버튼 -->
-  <div class="action-bar">
-    <button id="btn-save-log" class="btn btn--success" disabled>주간 로그에 저장</button>
-    <button id="btn-update-db" class="btn btn--success" disabled>툴 DB 업데이트</button>
+  <!-- 하단 상태 로그 -->
+  <div class="status-bar">
+    <div class="status-bar__toggle" id="status-toggle">
+      로그 <span id="log-badge" class="badge badge--sm">0</span>
+    </div>
+    <div id="status-log" class="status-log"></div>
   </div>
 
-  <!-- 상태 로그 -->
-  <div id="status-log" class="status-log"></div>
-
-  <!-- 푸터 -->
-  <footer class="footer">
-    AI있다 TAAFT Tracker &mdash; TAAFT 주간 인기 AI 툴 관리 도구
-  </footer>
-
-  <!-- JS (순서 중요: config → parser → sheets → ui → main) -->
-  <script src="js/config.js"></script>
-  <script src="js/parser.js"></script>
-  <script src="js/sheets.js"></script>
-  <script src="js/ui.js"></script>
-  <script src="js/main.js"></script>
+  <!-- JS (v=2 캐시 무효화) -->
+  <script src="js/config.js?v=4"></script>
+  <script src="js/parser.js?v=4"></script>
+  <script src="js/api.js?v=4"></script>
+  <script src="js/sheets.js?v=4"></script>
+  <script src="js/ui.js?v=4"></script>
+  <script src="js/main.js?v=4"></script>
 
 </body>
 </html>

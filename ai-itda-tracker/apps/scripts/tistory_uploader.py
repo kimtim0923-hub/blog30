@@ -11,7 +11,7 @@ import os
 import sys
 import time
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import markdown
 from pathlib import Path
@@ -166,10 +166,16 @@ def login(driver: webdriver.Chrome, blog_name: str,
 
 def post_article(driver: webdriver.Chrome, blog_name: str,
                  title: str, content: str,
-                 category: str = "생산성툴") -> bool:
+                 category: str = "생산성툴",
+                 visibility: str = "private",
+                 schedule_date: str = "",
+                 schedule_time: str = "") -> bool:
     """
     티스토리 새 글 작성 및 발행.
     blog_name: 예) myai (도메인 없이)
+    visibility: "public" | "private" (기본: private)
+    schedule_date: 예약 날짜 "YYYY-MM-DD" (빈 문자열이면 즉시 발행)
+    schedule_time: 예약 시간 "HH:MM" (기본: "09:00")
     """
     if blog_name.endswith(".tistory.com"):
         blog_name = blog_name.replace(".tistory.com", "")
@@ -326,53 +332,109 @@ def post_article(driver: webdriver.Chrome, blog_name: str,
         # 발행 설정 모달 처리
         time.sleep(SHORT_WAIT)
 
-        # ── 비공개 선택 ──
+        # ── 공개/비공개 선택 ──
+        target_visibility = "비공개" if visibility == "private" else "공개"
         try:
-            # 방법 1: "비공개" 텍스트가 포함된 라디오/버튼/span 클릭
-            private_el = WebDriverWait(driver, 5).until(
+            vis_el = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable(
                     (By.XPATH,
-                     "//label[contains(text(), '비공개')] | "
-                     "//span[contains(text(), '비공개')] | "
-                     "//input[@value='private' or @value='PRIVATE']/.. | "
-                     "//button[contains(text(), '비공개')]")
+                     f"//label[contains(text(), '{target_visibility}')] | "
+                     f"//span[contains(text(), '{target_visibility}')] | "
+                     f"//button[contains(text(), '{target_visibility}')]")
                 )
             )
-            private_el.click()
-            print("  🔒 비공개 선택 완료")
+            vis_el.click()
+            vis_icon = "🔒" if visibility == "private" else "🌐"
+            print(f"  {vis_icon} {target_visibility} 선택 완료")
             time.sleep(1)
         except TimeoutException:
-            # 방법 2: JavaScript로 비공개 라디오 선택
             try:
-                result = driver.execute_script("""
-                    // "비공개" 텍스트를 가진 요소 찾아서 클릭
+                result = driver.execute_script(f"""
                     var els = document.querySelectorAll('label, span, div, button');
-                    for (var i = 0; i < els.length; i++) {
-                        if (els[i].textContent.trim() === '비공개') {
+                    for (var i = 0; i < els.length; i++) {{
+                        if (els[i].textContent.trim() === '{target_visibility}') {{
                             els[i].click();
                             return 'clicked';
-                        }
-                    }
-                    // 라디오 input 직접 선택
-                    var radios = document.querySelectorAll('input[type="radio"]');
-                    for (var i = 0; i < radios.length; i++) {
-                        if (radios[i].value === 'private' || radios[i].value === 'PRIVATE') {
-                            radios[i].click();
-                            return 'radio_clicked';
-                        }
-                    }
+                        }}
+                    }}
                     return 'not_found';
                 """)
                 if result and 'clicked' in result:
-                    print("  🔒 비공개 선택 완료 (JS)")
+                    print(f"  {'🔒' if visibility == 'private' else '🌐'} {target_visibility} 선택 완료 (JS)")
                 else:
-                    print("  ⚠️ 비공개 옵션을 찾지 못했습니다 — 수동 확인 필요")
-                    save_screenshot(driver, "private_fail")
+                    print(f"  ⚠️ {target_visibility} 옵션을 찾지 못했습니다 — 수동 확인 필요")
+                    save_screenshot(driver, "visibility_fail")
             except Exception as e:
-                print(f"  ⚠️ 비공개 설정 실패: {e}")
-                save_screenshot(driver, "private_fail")
+                print(f"  ⚠️ 공개 설정 실패: {e}")
+                save_screenshot(driver, "visibility_fail")
 
         time.sleep(1)
+
+        # ── 예약 설정 (schedule_date가 있을 때만) ──
+        if schedule_date:
+            s_time = schedule_time or "09:00"
+            s_hour, s_min = s_time.split(":")
+            print(f"  📅 예약 설정: {schedule_date} {s_time}")
+
+            try:
+                result = driver.execute_script(f"""
+                    // 발행일 영역 찾기
+                    var labels = document.querySelectorAll('*');
+                    var publishRow = null;
+                    for (var i = 0; i < labels.length; i++) {{
+                        if (labels[i].textContent.trim() === '발행일' &&
+                            labels[i].children.length === 0) {{
+                            publishRow = labels[i].closest('div, tr, li, section') ||
+                                         labels[i].parentElement;
+                            break;
+                        }}
+                    }}
+                    if (!publishRow) return 'no_publish_row';
+
+                    var inputs = publishRow.querySelectorAll('input');
+                    var setter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value').set;
+
+                    // 날짜 설정
+                    for (var i = 0; i < inputs.length; i++) {{
+                        if (inputs[i].value.match(/^\\d{{4}}-\\d{{2}}-\\d{{2}}$/)) {{
+                            setter.call(inputs[i], '{schedule_date}');
+                            inputs[i].dispatchEvent(new Event('input', {{bubbles:true}}));
+                            inputs[i].dispatchEvent(new Event('change', {{bubbles:true}}));
+                        }}
+                    }}
+
+                    // 시/분 설정
+                    var numInputs = [];
+                    for (var i = 0; i < inputs.length; i++) {{
+                        if (inputs[i].value.match(/^\\d{{1,2}}$/) && !inputs[i].value.match(/^\\d{{4}}/)) {{
+                            numInputs.push(inputs[i]);
+                        }}
+                    }}
+                    if (numInputs.length >= 2) {{
+                        setter.call(numInputs[0], '{s_hour}');
+                        numInputs[0].dispatchEvent(new Event('input', {{bubbles:true}}));
+                        numInputs[0].dispatchEvent(new Event('change', {{bubbles:true}}));
+                        setter.call(numInputs[1], '{s_min}');
+                        numInputs[1].dispatchEvent(new Event('input', {{bubbles:true}}));
+                        numInputs[1].dispatchEvent(new Event('change', {{bubbles:true}}));
+                    }}
+
+                    // "예약" 텍스트 클릭
+                    var spans = publishRow.querySelectorAll('span, button, a');
+                    for (var i = 0; i < spans.length; i++) {{
+                        if (spans[i].textContent.trim() === '예약') {{
+                            spans[i].click();
+                            break;
+                        }}
+                    }}
+                    return 'ok';
+                """)
+                print(f"  ✅ 예약 설정 완료: {result}")
+                time.sleep(SHORT_WAIT)
+            except Exception as e:
+                print(f"  ⚠️ 예약 설정 실패: {e}")
+                save_screenshot(driver, "schedule_fail")
 
         # ── 최종 발행 버튼 클릭 ──
         try:
@@ -383,12 +445,14 @@ def post_article(driver: webdriver.Chrome, blog_name: str,
                 )
             )
             confirm_btn.click()
-            print("  ✅ 비공개 발행 버튼 클릭")
+            mode = "예약" if schedule_date else target_visibility
+            print(f"  ✅ {mode} 발행 버튼 클릭")
             time.sleep(MEDIUM_WAIT)
         except TimeoutException:
             pass
 
-        print(f"  ✅ 글 비공개 발행 완료!")
+        mode_label = f"예약({schedule_date})" if schedule_date else target_visibility
+        print(f"  ✅ 글 {mode_label} 발행 완료!")
         return True
 
     except TimeoutException as e:
