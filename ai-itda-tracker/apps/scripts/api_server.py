@@ -64,9 +64,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 이미지 업로드 디렉토리
-_UPLOADS_DIR = _SCRIPT_DIR.parent.parent / "uploads" / "images"
-_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+# 이미지 업로드 디렉토리 (Vercel은 /tmp만 쓰기 가능)
+_UPLOADS_DIR = Path("/tmp/uploads/images") if os.environ.get("VERCEL") else _SCRIPT_DIR.parent.parent / "uploads" / "images"
+try:
+    _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    _UPLOADS_DIR = Path("/tmp/uploads/images")
+    _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # 정적 파일 서빙 (업로드된 이미지)
 app.mount("/uploads", StaticFiles(directory=str(_UPLOADS_DIR.parent)), name="uploads")
