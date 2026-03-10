@@ -18,9 +18,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 
-# .env 로드 (이 파일 위치 기준)
+# .env 로드 (이 파일 위치 기준, 기존 환경변수를 덮어쓰지 않음)
 _SCRIPT_DIR = Path(__file__).parent
-load_dotenv(_SCRIPT_DIR / ".env")
+load_dotenv(_SCRIPT_DIR / ".env", override=False)
 
 # Google Sheets API 스코프
 SCOPES = [
@@ -53,18 +53,28 @@ class SheetsClient:
     """Google Sheets TAAFT Tracker 읽기/쓰기 클라이언트"""
 
     def __init__(self):
-        creds_path = os.environ.get("GOOGLE_CREDENTIALS_JSON", "./credentials.json")
+        creds_env = os.environ.get("GOOGLE_CREDENTIALS_JSON", "./credentials.json")
         spreadsheet_id = os.environ.get("SPREADSHEET_ID", "")
 
         if not spreadsheet_id:
             raise ValueError("SPREADSHEET_ID가 .env에 설정되지 않았습니다.")
-        if not Path(creds_path).exists():
-            raise FileNotFoundError(
-                f"credentials.json을 찾을 수 없습니다: {creds_path}\n"
-                "Google Cloud Console에서 서비스 계정 키를 다운로드하세요."
-            )
 
-        creds = Credentials.from_service_account_file(creds_path, scopes=SCOPES)
+        # Railway 배포: 환경변수에 JSON 내용 직접 입력 → json.loads로 파싱
+        # 로컬: 파일 경로 → from_service_account_file로 로드
+        import json
+        if creds_env.strip().startswith("{"):
+            # JSON 문자열이 직접 들어온 경우 (Railway 등 클라우드 배포)
+            creds_info = json.loads(creds_env)
+            creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+        else:
+            # 파일 경로인 경우 (로컬 개발)
+            creds_path = creds_env
+            if not Path(creds_path).exists():
+                raise FileNotFoundError(
+                    f"credentials.json을 찾을 수 없습니다: {creds_path}\n"
+                    "Google Cloud Console에서 서비스 계정 키를 다운로드하세요."
+                )
+            creds = Credentials.from_service_account_file(creds_path, scopes=SCOPES)
         self.client = gspread.authorize(creds)
         self.spreadsheet = self.client.open_by_key(spreadsheet_id)
         print(f"✅ 스프레드시트 연결 완료: {self.spreadsheet.title}")

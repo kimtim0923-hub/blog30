@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 
 # .env 로드
 _SCRIPT_DIR = Path(__file__).parent
-load_dotenv(_SCRIPT_DIR / ".env")
+load_dotenv(_SCRIPT_DIR / ".env", override=False)
 
 from sheets_client import SheetsClient
 from blog_generator import (
