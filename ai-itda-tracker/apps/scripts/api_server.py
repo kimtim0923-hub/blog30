@@ -58,7 +58,7 @@ if _extra_origin:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
-    allow_origin_regex=r"https://.*\.lovable\.app",  # Lovable 서브도메인 전체 허용
+    allow_origin_regex=r"https://.*\.(lovable\.app|lovableproject\.com)",  # Lovable 서브도메인 + 프리뷰 전체 허용
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
