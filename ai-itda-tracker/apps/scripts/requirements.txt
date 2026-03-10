@@ -1,0 +1,17 @@
+# AI있다 TAAFT Tracker — Python 패키지 목록
+# 설치: pip install -r requirements.txt
+
+# Google Sheets 연동
+gspread>=5.12.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+
+# Claude API (블로그 생성)
+anthropic>=0.25.0
+
+# Selenium (티스토리 자동 업로드)
+selenium>=4.15.0
+webdriver-manager>=4.0.1
+
+# 환경변수 관리
+python-dotenv>=1.0.0

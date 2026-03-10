@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(unzip -l \"/Users/sorakim/Desktop/ai blog30/ai-itda-blog-writer.skill\")",
+      "Bash(unzip -q \"/Users/sorakim/Desktop/ai blog30/ai-itda-blog-writer.skill\" -d /tmp/skill_extract_$$)",
+      "Read(//private/tmp/**)",
+      "Bash(unzip -q \"/Users/sorakim/Desktop/ai blog30/ai-itda-blog-writer.skill\")",
+      "Bash(unzip -p \"ai-itda-blog-writer.skill\" \"ai-itda-blog-writer/SKILL.md\")",
+      "Bash(python3 -c \":*)"
+    ]
+  }
+}
