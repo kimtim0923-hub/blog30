@@ -589,6 +589,20 @@ def root():
     return {"status": "ok", "service": "AI있다 TAAFT Tracker API"}
 
 
+@app.get("/api/debug-env")
+def debug_env():
+    """환경변수 디버깅 (임시)."""
+    creds = os.environ.get("GOOGLE_CREDENTIALS_JSON", "NOT SET")
+    return {
+        "creds_length": len(creds),
+        "creds_first_50": creds[:50],
+        "creds_last_50": creds[-50:] if len(creds) > 50 else creds,
+        "starts_with_brace": creds.strip().startswith("{"),
+        "has_client_email": "client_email" in creds,
+        "has_token_uri": "token_uri" in creds,
+    }
+
+
 @app.get("/api/health")
 def health_check():
     """서버 상태 확인."""
